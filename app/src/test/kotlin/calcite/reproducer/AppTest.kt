@@ -3,12 +3,16 @@
  */
 package calcite.reproducer
 
+import org.apache.calcite.adapter.jdbc.JdbcImplementor
+import org.apache.calcite.jdbc.JavaTypeFactoryImpl
 import org.apache.calcite.rel.core.JoinRelType
+import org.apache.calcite.sql.SqlDialect
 import org.apache.calcite.sql.`fun`.SqlStdOperatorTable
 import org.apache.calcite.sql.type.SqlTypeName
 import org.apache.calcite.tools.Frameworks
 import org.apache.calcite.tools.RelBuilder
 import kotlin.test.Test
+import kotlin.test.assertEquals
 
 class AppTest {
     @Test
@@ -59,5 +63,42 @@ class AppTest {
             aggregateCall1, aggregateCall2,
             aggregateCall1, aggregateCall2,
         )
+    }
+
+    @Test
+    fun testCalcite6068() {
+        val rootSchema = Frameworks.createRootSchema(true)
+
+        val tableOpportunity = CalciqueTable(
+            listOf(
+                Column.Basic("id", SqlTypeName.INTEGER),
+            )
+        )
+        rootSchema.add("f_opportunity", tableOpportunity)
+
+        val frameworkConfig = Frameworks.newConfigBuilder().defaultSchema(rootSchema).build()
+        val relBuilder = RelBuilder.create(frameworkConfig)
+
+        val opportunityId = relBuilder.scan("f_opportunity").field("f_opportunity", "id")
+        val filter = relBuilder.`in`(
+            opportunityId,
+            relBuilder.literal("value 1 "),
+            relBuilder.literal("value 2 ")
+        )
+
+        /*
+        // the same result with OR
+        val filterFirst = relBuilder.equals(opportunityId, relBuilder.literal("value 1 "))
+        val filterSecond = relBuilder.equals(opportunityId, relBuilder.literal("value 2 "))
+        val filter = RelOptUtil.conjunctions(relBuilder.or(filterFirst, filterSecond))
+        */
+
+        val root = relBuilder.scan("f_opportunity").filter(filter).build()
+
+        val dialect = SqlDialect.DatabaseProduct.POSTGRESQL.dialect
+        val sql = JdbcImplementor(dialect, JavaTypeFactoryImpl())
+            .visitRoot(root).asStatement().toSqlString(dialect).sql
+
+        assertEquals("SELECT *\nFROM \"f_opportunity\"\nWHERE \"id\" IN ('value 1 ', 'value 2 ')", sql)
     }
 }
